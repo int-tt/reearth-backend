@@ -11,7 +11,7 @@ import (
 	"github.com/reearth/reearth-backend/internal/usecase/interactor"
 	"github.com/reearth/reearth-backend/pkg/log"
 	"github.com/reearth/reearth-backend/pkg/rerror"
-	echotracer "go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 )
 
 func initEcho(cfg *ServerConfig) *echo.Echo {
@@ -27,8 +27,7 @@ func initEcho(cfg *ServerConfig) *echo.Echo {
 	logger := GetEchoLogger()
 	e.Logger = logger
 	e.Use(logger.Hook())
-	e.Use(middleware.Recover(), echotracer.Middleware("reearth-backend"))
-
+	e.Use(middleware.Recover(), otelecho.Middleware("reearth-backend"))
 	origins := allowedOrigins(cfg)
 	if len(origins) > 0 {
 		e.Use(
