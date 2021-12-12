@@ -16,3 +16,5 @@ package gqldataloader
 //go:generate go run github.com/vektah/dataloaden TagLoader github.com/reearth/reearth-backend/pkg/id.TagID *github.com/reearth/reearth-backend/internal/adapter/gql/gqlmodel.Tag
 //go:generate go run github.com/vektah/dataloaden TagItemLoader github.com/reearth/reearth-backend/pkg/id.TagID *github.com/reearth/reearth-backend/internal/adapter/gql/gqlmodel.TagItem
 //go:generate go run github.com/vektah/dataloaden TagGroupLoader github.com/reearth/reearth-backend/pkg/id.TagID *github.com/reearth/reearth-backend/internal/adapter/gql/gqlmodel.TagGroup
+//Mongo
+//go:generate go run github.com/vektah/dataloaden LayerMongoLoader github.com/reearth/reearth-backend/pkg/id.LayerID *github.com/reearth/reearth-backend/pkg/layer.Item
