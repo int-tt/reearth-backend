@@ -28,6 +28,7 @@ func (r *layerRepo) init() {
 	if len(i) > 0 {
 		log.Infof("mongo: %s: index created: %s", "layer", i)
 	}
+
 }
 
 func (r *layerRepo) FindByID(ctx context.Context, id id.LayerID, f []id.SceneID) (layer.Layer, error) {

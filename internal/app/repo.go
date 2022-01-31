@@ -74,6 +74,7 @@ func initReposAndGateways(ctx context.Context, conf *Config, debug bool) (*repo.
 	if err := repos.SceneLock.ReleaseAllLock(context.Background()); err != nil {
 		log.Fatalln(fmt.Sprintf("repo initialization error: %+v", err))
 	}
-
+	// TEMP
+	repos.Layer = &mongorepo.LayerDataLoader{Layer: repos.Layer}
 	return repos, gateways
 }

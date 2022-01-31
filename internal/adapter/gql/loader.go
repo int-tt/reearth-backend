@@ -13,17 +13,17 @@ const (
 )
 
 type Loaders struct {
-	usecases interfaces.Container
-	Asset    *AssetLoader
-	Dataset  *DatasetLoader
-	Layer    *LayerLoader
-	Plugin   *PluginLoader
-	Project  *ProjectLoader
-	Property *PropertyLoader
-	Scene    *SceneLoader
-	Team     *TeamLoader
-	User     *UserLoader
-	Tag      *TagLoader
+	usecases   interfaces.Container
+	Asset      *AssetLoader
+	Dataset    *DatasetLoader
+	Layer      *LayerLoader
+	Plugin     *PluginLoader
+	Project    *ProjectLoader
+	Property   *PropertyLoader
+	Scene      *SceneLoader
+	Team       *TeamLoader
+	User       *UserLoader
+	Tag        *TagLoader
 }
 
 type DataLoaders struct {
@@ -47,17 +47,17 @@ type DataLoaders struct {
 
 func NewLoaders(usecases interfaces.Container) Loaders {
 	return Loaders{
-		usecases: usecases,
-		Asset:    NewAssetLoader(usecases.Asset),
-		Dataset:  NewDatasetLoader(usecases.Dataset),
-		Layer:    NewLayerLoader(usecases.Layer),
-		Plugin:   NewPluginLoader(usecases.Plugin),
-		Project:  NewProjectLoader(usecases.Project),
-		Property: NewPropertyLoader(usecases.Property),
-		Scene:    NewSceneLoader(usecases.Scene),
-		Team:     NewTeamLoader(usecases.Team),
-		User:     NewUserLoader(usecases.User),
-		Tag:      NewTagLoader(usecases.Tag),
+		usecases:   usecases,
+		Asset:      NewAssetLoader(usecases.Asset),
+		Dataset:    NewDatasetLoader(usecases.Dataset),
+		Layer:      NewLayerLoader(usecases.Layer),
+		Plugin:     NewPluginLoader(usecases.Plugin),
+		Project:    NewProjectLoader(usecases.Project),
+		Property:   NewPropertyLoader(usecases.Property),
+		Scene:      NewSceneLoader(usecases.Scene),
+		Team:       NewTeamLoader(usecases.Team),
+		User:       NewUserLoader(usecases.User),
+		Tag:        NewTagLoader(usecases.Tag),
 	}
 }
 

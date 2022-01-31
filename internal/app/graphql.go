@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	mongorepo "github.com/reearth/reearth-backend/internal/infrastructure/mongo"
+	"github.com/reearth/reearth-backend/internal/usecase/repo"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -17,12 +19,12 @@ import (
 
 const enableDataLoaders = true
 
-func dataLoaderMiddleware(container gql.Loaders) echo.MiddlewareFunc {
+func dataLoaderMiddleware(container gql.Loaders, repos *repo.Container) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(echoCtx echo.Context) error {
 			req := echoCtx.Request()
 			ctx := req.Context()
-
+			ctx = context.WithValue(ctx, mongorepo.DataLoadersKey(),mongorepo.NewLayerDataloader(ctx,repos.Layer))
 			ctx = context.WithValue(ctx, gql.DataLoadersKey(), container.DataLoadersWith(ctx, enableDataLoaders))
 			echoCtx.SetRequest(req.WithContext(ctx))
 			return next(echoCtx)
@@ -89,5 +91,5 @@ func graphqlAPI(
 	r.POST("/graphql", func(c echo.Context) error {
 		srv.ServeHTTP(c.Response(), c.Request())
 		return nil
-	}, dataLoaderMiddleware(controllers), tracerMiddleware(false))
+	}, dataLoaderMiddleware(controllers,conf.Repos), tracerMiddleware(false))
 }
