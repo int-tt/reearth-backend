@@ -3,6 +3,7 @@
 package mongo
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -219,6 +220,7 @@ func (b *layerLoaderBatch) startTimer(l *LayerLoader) {
 }
 
 func (b *layerLoaderBatch) end(l *LayerLoader) {
+	fmt.Printf("end: %#v",b.keys)
 	b.data, b.error = l.fetch(b.keys)
 	close(b.done)
 }

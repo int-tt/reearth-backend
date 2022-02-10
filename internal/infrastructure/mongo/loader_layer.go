@@ -5,6 +5,7 @@ package mongo
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/reearth/reearth-backend/internal/usecase/repo"
 	"github.com/reearth/reearth-backend/pkg/id"
 	"github.com/reearth/reearth-backend/pkg/layer"
@@ -12,28 +13,33 @@ import (
 
 type LayerDataLoader struct {
 	Layer repo.Layer
-	loader LayerLoader
+	loader *LayerLoader
 }
 
 type LayerDataLoaderParam struct {
-	LayerID  id.LayerID
+	LayerID  string
 	SceneIDs []id.SceneID
 }
 
 func NewLayerDataloader(ctx context.Context, layer repo.Layer) *LayerDataLoader {
 	l :=&LayerDataLoader{Layer: layer}
-	l.NewLayerDataLoader(ctx)
+	l.loader = l.NewLayerDataLoader(ctx)
 	return l
 }
 func (l *LayerDataLoader) Fetch(ctx context.Context, keys []string) ([]*layer.Item, []error) {
 	ids := make([]id.LayerID, 0, len(keys))
 	var sceneIDs []id.SceneID
 	for _, key := range keys {
+		fmt.Println("key:",key)
 		var param LayerDataLoaderParam
 		if  err := json.Unmarshal([]byte(key),&param); err != nil {
 			return nil, []error{err}
 		}
-		ids = append(ids, param.LayerID)
+		layerID, err := id.LayerIDFrom(param.LayerID)
+		if err != nil {
+			return nil, []error{err}
+		}
+		ids = append(ids, layerID)
 		sceneIDs = param.SceneIDs
 	}
 	//SceneIDは同一Contextであれば同じ(のはず)なので0を指定
@@ -69,13 +75,16 @@ func (l *LayerDataLoader) FindByIDs(ctx context.Context, ids []id.LayerID, f []i
 func (l *LayerDataLoader) FindItemByID(ctx context.Context, id id.LayerID, sids []id.SceneID) (*layer.Item, error) {
 	//// Call data loader
 	//
+	fmt.Printf("id:%#v\n",id)
+	fmt.Printf("id.String:%#v\n",id.String())
 	key, err := json.Marshal(LayerDataLoaderParam{
-		LayerID:  id,
+		LayerID:  id.String(),
 		SceneIDs: sids,
 	})
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("FindItemById: %s", string(key))
 	return DataLoadersFromContext(ctx).loader.Load(string(key))
 }
 
