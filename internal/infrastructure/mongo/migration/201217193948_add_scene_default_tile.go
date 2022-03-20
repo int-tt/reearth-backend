@@ -47,7 +47,7 @@ func AddSceneDefaultTile(ctx context.Context, c DBClient) error {
 	log.Infof("migration: AddSceneDefaultTile: filter: %+v\n", filter)
 
 	return col.Find(ctx, filter, &mongodoc.PropertyBatchConsumer{
-		Size: 50,
+		Size: 1000,
 		Callback: func(properties []*property.Property) error {
 			log.Infof("migration: AddSceneDefaultTile: hit properties: %d\n", len(properties))
 
@@ -60,7 +60,7 @@ func AddSceneDefaultTile(ctx context.Context, c DBClient) error {
 				g.Add(f, -1)
 			}
 
-			docs, ids := mongodoc.NewProperties(properties)
+			docs, ids := mongodoc.NewProperties(properties, nil)
 
 			return col.SaveAll(ctx, ids, docs)
 		},

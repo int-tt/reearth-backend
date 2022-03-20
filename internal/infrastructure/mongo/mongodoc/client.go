@@ -88,24 +88,16 @@ func (c *Client) Count(ctx context.Context, col string, filter interface{}) (int
 	return count, nil
 }
 
-func (c *Client) RemoveAll(ctx context.Context, col string, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	filter := bson.D{
-		{Key: "id", Value: bson.D{
-			{Key: "$in", Value: ids},
-		}},
-	}
-	_, err := c.Collection(col).DeleteMany(ctx, filter)
+func (c *Client) RemoveOne(ctx context.Context, col string, f interface{}) error {
+	_, err := c.Collection(col).DeleteOne(ctx, f)
 	if err != nil {
 		return rerror.ErrInternalBy(err)
 	}
 	return nil
 }
 
-func (c *Client) RemoveOne(ctx context.Context, col string, id string) error {
-	_, err := c.Collection(col).DeleteOne(ctx, bson.D{{Key: "id", Value: id}})
+func (c *Client) RemoveAll(ctx context.Context, col string, f interface{}) error {
+	_, err := c.Collection(col).DeleteMany(ctx, f)
 	if err != nil {
 		return rerror.ErrInternalBy(err)
 	}
@@ -113,10 +105,7 @@ func (c *Client) RemoveOne(ctx context.Context, col string, id string) error {
 }
 
 var (
-	upsert        = true
-	replaceOption = &options.ReplaceOptions{
-		Upsert: &upsert,
-	}
+	replaceOption = (&options.ReplaceOptions{}).SetUpsert(true)
 )
 
 func (c *Client) SaveOne(ctx context.Context, col string, id string, replacement interface{}) error {
@@ -138,11 +127,13 @@ func (c *Client) SaveAll(ctx context.Context, col string, ids []string, updates 
 	writeModels := make([]mongo.WriteModel, 0, len(updates))
 	for i, u := range updates {
 		id := ids[i]
-		writeModels = append(writeModels, &mongo.ReplaceOneModel{
-			Upsert:      &upsert,
-			Filter:      bson.M{"id": id},
-			Replacement: u,
-		})
+		writeModels = append(
+			writeModels,
+			(&mongo.ReplaceOneModel{}).
+				SetUpsert(true).
+				SetFilter(bson.M{"id": id}).
+				SetReplacement(u),
+		)
 	}
 
 	_, err := c.Collection(col).BulkWrite(ctx, writeModels)
@@ -202,45 +193,30 @@ func getCursor(raw bson.Raw, key string) (*usecase.Cursor, error) {
 	return &c, nil
 }
 
-func (c *Client) Paginate(ctx context.Context, col string, filter interface{}, p *usecase.Pagination, consumer Consumer) (*usecase.PageInfo, error) {
+func (c *Client) Paginate(ctx context.Context, col string, filter interface{}, sort *string, p *Pagination, consumer Consumer) (*usecase.PageInfo, error) {
 	if p == nil {
 		return nil, nil
 	}
 	coll := c.Collection(col)
+	const key = "id"
 
-	key := "id"
+	findOptions := options.Find().SetCollation(&options.Collation{Strength: 1, Locale: "en"})
+
+	sortOptions, sortKey := sortOptionsFrom(sort, p, key)
+
+	findOptions.Sort = sortOptions
 
 	count, err := coll.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count documents: %v", err.Error())
 	}
 
-	reverse := false
-	var limit int64
-	findOptions := options.Find()
-	if first := p.First; first != nil {
-		limit = int64(*first)
-		findOptions.Sort = bson.D{
-			{Key: key, Value: 1},
-		}
-		if after := p.After; after != nil {
-			filter = appendE(filter, bson.E{Key: key, Value: bson.D{
-				{Key: "$gt", Value: *after},
-			}})
-		}
+	filter, limit, err := paginationFilter(ctx, coll, p, sortKey, key, filter)
+	if err != nil {
+		return nil, err
 	}
-	if last := p.Last; last != nil {
-		reverse = true
-		limit = int64(*last)
-		findOptions.Sort = bson.D{
-			{Key: key, Value: -1},
-		}
-		if before := p.Before; before != nil {
-			filter = appendE(filter, bson.E{Key: key, Value: bson.D{
-				{Key: "$lt", Value: *before},
-			}})
-		}
-	}
+
+	// 更に読める要素があるのか確かめるために一つ多めに読み出す
 	// Read one more element so that we can see whether there's a further one
 	limit++
 	findOptions.Limit = &limit
@@ -268,13 +244,6 @@ func (c *Client) Paginate(ctx context.Context, col string, filter interface{}, p
 		hasMore = true
 		// Remove the extra one reading.
 		results = results[:len(results)-1]
-	}
-
-	if reverse {
-		for i := len(results)/2 - 1; i >= 0; i-- {
-			opp := len(results) - 1 - i
-			results[i], results[opp] = results[opp], results[i]
-		}
 	}
 
 	for _, result := range results {
@@ -312,25 +281,86 @@ func (c *Client) Paginate(ctx context.Context, col string, filter interface{}, p
 	return usecase.NewPageInfo(int(count), startCursor, endCursor, hasNextPage, hasPreviousPage), nil
 }
 
+func sortOptionsFrom(sort *string, p *Pagination, key string) (bson.D, string) {
+	var sortOptions bson.D
+	var sortKey = ""
+	if sort != nil && len(*sort) > 0 && *sort != "id" {
+		sortKey = *sort
+		sortOptions = append(sortOptions, bson.E{Key: sortKey, Value: p.SortDirection()})
+	}
+	sortOptions = append(sortOptions, bson.E{Key: key, Value: p.SortDirection()})
+	return sortOptions, sortKey
+}
+
+func paginationFilter(ctx context.Context, coll *mongo.Collection, p *Pagination, sortKey, key string, filter interface{}) (interface{}, int64, error) {
+	limit, op, cur, err := p.Parameters()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse pagination parameters: %w", err)
+	}
+
+	var paginationFilter bson.M
+
+	if cur != nil {
+
+		if sortKey == "" {
+			paginationFilter = bson.M{key: bson.M{op: *cur}}
+		} else {
+			var curObj bson.M
+			if err := coll.FindOne(ctx, bson.M{key: *cur}).Decode(&curObj); err != nil {
+				return nil, 0, fmt.Errorf("failed to find cursor element")
+			}
+			if curObj[sortKey] == nil {
+				return nil, 0, fmt.Errorf("invalied sort key")
+			}
+			paginationFilter = bson.M{
+				"$or": []bson.M{
+					{sortKey: bson.M{op: curObj[sortKey]}},
+					{
+						sortKey: curObj[sortKey],
+						key:     bson.M{op: *cur},
+					},
+				},
+			}
+		}
+	}
+
+	return And(
+		filter,
+		"",
+		paginationFilter,
+	), limit, nil
+}
+
 func (c *Client) CreateIndex(ctx context.Context, col string, keys []string) []string {
+	return c.CreateUniqueIndex(ctx, col, keys, []string{})
+}
+
+func (c *Client) CreateUniqueIndex(ctx context.Context, col string, keys, uniqueKeys []string) []string {
 	coll := c.Collection(col)
 	indexedKeys := indexes(ctx, coll)
 
-	newIndexes := []mongo.IndexModel{}
+	// store unique keys as map to check them in an efficient way
+	ukm := map[string]struct{}{}
+	for _, k := range append([]string{"id"}, uniqueKeys...) {
+		ukm[k] = struct{}{}
+	}
+
+	var newIndexes []mongo.IndexModel
 	for _, k := range append([]string{"id"}, keys...) {
-		if _, ok := indexedKeys[k]; !ok {
-			indexBg := true
-			unique := k == "id"
-			newIndexes = append(newIndexes, mongo.IndexModel{
-				Keys: map[string]int{
-					k: 1,
-				},
-				Options: &options.IndexOptions{
-					Background: &indexBg,
-					Unique:     &unique,
-				},
-			})
+		if _, ok := indexedKeys[k]; ok {
+			continue
 		}
+		indexBg := true
+		_, isUnique := ukm[k]
+		newIndexes = append(newIndexes, mongo.IndexModel{
+			Keys: map[string]int{
+				k: 1,
+			},
+			Options: &options.IndexOptions{
+				Background: &indexBg,
+				Unique:     &isUnique,
+			},
+		})
 	}
 
 	if len(newIndexes) > 0 {

@@ -28,8 +28,8 @@ func NewTeam(r *repo.Container) interfaces.Team {
 }
 
 func (i *Team) Fetch(ctx context.Context, ids []id.TeamID, operator *usecase.Operator) ([]*user.Team, error) {
-	if operator == nil {
-		return nil, interfaces.ErrOperationDenied
+	if err := i.OnlyOperator(operator); err != nil {
+		return nil, err
 	}
 	res, err := i.teamRepo.FindByIDs(ctx, ids)
 	res2, err := i.filterTeams(res, operator, err)
@@ -37,16 +37,15 @@ func (i *Team) Fetch(ctx context.Context, ids []id.TeamID, operator *usecase.Ope
 }
 
 func (i *Team) FindByUser(ctx context.Context, id id.UserID, operator *usecase.Operator) ([]*user.Team, error) {
-	if operator == nil {
-		return nil, interfaces.ErrOperationDenied
+	if err := i.OnlyOperator(operator); err != nil {
+		return nil, err
 	}
 	res, err := i.teamRepo.FindByUser(ctx, id)
 	res2, err := i.filterTeams(res, operator, err)
 	return res2, err
 }
 
-func (i *Team) Create(ctx context.Context, name string, firstUser id.UserID) (_ *user.Team, err error) {
-
+func (i *Team) Create(ctx context.Context, name string, firstUser id.UserID, operator *usecase.Operator) (_ *user.Team, err error) {
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -65,22 +64,20 @@ func (i *Team) Create(ctx context.Context, name string, firstUser id.UserID) (_ 
 		return nil, err
 	}
 
-	err = team.Members().Join(firstUser, user.RoleOwner)
-	if err != nil {
+	if err := team.Members().Join(firstUser, user.RoleOwner); err != nil {
 		return nil, err
 	}
 
-	err = i.teamRepo.Save(ctx, team)
-	if err != nil {
+	if err := i.teamRepo.Save(ctx, team); err != nil {
 		return nil, err
 	}
 
+	operator.AddNewTeam(team.ID())
 	tx.Commit()
 	return team, nil
 }
 
 func (i *Team) Update(ctx context.Context, id id.TeamID, name string, operator *usecase.Operator) (_ *user.Team, err error) {
-
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -118,7 +115,6 @@ func (i *Team) Update(ctx context.Context, id id.TeamID, name string, operator *
 }
 
 func (i *Team) AddMember(ctx context.Context, id id.TeamID, u id.UserID, role user.Role, operator *usecase.Operator) (_ *user.Team, err error) {
-
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -164,7 +160,6 @@ func (i *Team) AddMember(ctx context.Context, id id.TeamID, u id.UserID, role us
 }
 
 func (i *Team) RemoveMember(ctx context.Context, id id.TeamID, u id.UserID, operator *usecase.Operator) (_ *user.Team, err error) {
-
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -209,7 +204,6 @@ func (i *Team) RemoveMember(ctx context.Context, id id.TeamID, u id.UserID, oper
 }
 
 func (i *Team) UpdateMember(ctx context.Context, id id.TeamID, u id.UserID, role user.Role, operator *usecase.Operator) (_ *user.Team, err error) {
-
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -254,7 +248,6 @@ func (i *Team) UpdateMember(ctx context.Context, id id.TeamID, u id.UserID, role
 }
 
 func (i *Team) Remove(ctx context.Context, id id.TeamID, operator *usecase.Operator) (err error) {
-
 	tx, err := i.transaction.Begin()
 	if err != nil {
 		return
@@ -305,7 +298,7 @@ func (i *Team) filterTeams(teams []*user.Team, operator *usecase.Operator, err e
 		return make([]*user.Team, len(teams)), nil
 	}
 	for i, t := range teams {
-		if t == nil || !operator.IsReadableTeamIncluded(t.ID()) {
+		if t == nil || !operator.IsReadableTeam(t.ID()) {
 			teams[i] = nil
 		}
 	}

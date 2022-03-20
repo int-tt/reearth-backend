@@ -5,46 +5,52 @@ import (
 	"sync"
 	"time"
 
+	"github.com/reearth/reearth-backend/internal/usecase/repo"
 	"github.com/reearth/reearth-backend/pkg/id"
 	"github.com/reearth/reearth-backend/pkg/rerror"
 	"github.com/reearth/reearth-backend/pkg/scene"
-
-	"github.com/reearth/reearth-backend/internal/usecase/repo"
+	"github.com/reearth/reearth-backend/pkg/user"
 )
 
 type Scene struct {
 	lock sync.Mutex
-	data map[id.SceneID]scene.Scene
+	data map[id.SceneID]*scene.Scene
+	f    repo.TeamFilter
 }
 
 func NewScene() repo.Scene {
 	return &Scene{
-		data: map[id.SceneID]scene.Scene{},
+		data: map[id.SceneID]*scene.Scene{},
 	}
 }
 
-func (r *Scene) FindByID(ctx context.Context, id id.SceneID, f []id.TeamID) (*scene.Scene, error) {
+func (r *Scene) Filtered(f repo.TeamFilter) repo.Scene {
+	return &Scene{
+		// note data is shared between the source repo and mutex cannot work well
+		data: r.data,
+		f:    r.f.Merge(f),
+	}
+}
+
+func (r *Scene) FindByID(ctx context.Context, id id.SceneID) (*scene.Scene, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	s, ok := r.data[id]
-	if ok && isTeamIncludes(s.Team(), f) {
-		return &s, nil
+	if s, ok := r.data[id]; ok && r.f.CanRead(s.Team()) {
+		return s, nil
 	}
 	return nil, rerror.ErrNotFound
 }
 
-func (r *Scene) FindByIDs(ctx context.Context, ids []id.SceneID, f []id.TeamID) ([]*scene.Scene, error) {
+func (r *Scene) FindByIDs(ctx context.Context, ids []id.SceneID) (scene.List, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	result := []*scene.Scene{}
+	result := scene.List{}
 	for _, id := range ids {
-		if d, ok := r.data[id]; ok {
-			if isTeamIncludes(d.Team(), f) {
-				result = append(result, &d)
-				continue
-			}
+		if d, ok := r.data[id]; ok && r.f.CanRead(d.Team()) {
+			result = append(result, d)
+			continue
 		}
 		result = append(result, nil)
 
@@ -52,85 +58,51 @@ func (r *Scene) FindByIDs(ctx context.Context, ids []id.SceneID, f []id.TeamID) 
 	return result, nil
 }
 
-func (r *Scene) FindByProject(ctx context.Context, id id.ProjectID, f []id.TeamID) (*scene.Scene, error) {
+func (r *Scene) FindByProject(ctx context.Context, id id.ProjectID) (*scene.Scene, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	for _, d := range r.data {
-		if d.Project() == id && isTeamIncludes(d.Team(), f) {
-			return &d, nil
+		if d.Project() == id && r.f.CanRead(d.Team()) {
+			return d, nil
 		}
 	}
 	return nil, rerror.ErrNotFound
 }
 
-func (r *Scene) FindIDsByTeam(ctx context.Context, teams []id.TeamID) ([]id.SceneID, error) {
+func (r *Scene) FindByTeam(ctx context.Context, teams ...id.TeamID) (scene.List, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	result := []id.SceneID{}
+	result := scene.List{}
 	for _, d := range r.data {
-		if isTeamIncludes(d.Team(), teams) {
-			result = append(result, d.ID())
+		if user.TeamIDList(teams).Includes(d.Team()) && r.f.CanRead(d.Team()) {
+			result = append(result, d)
 		}
 	}
 	return result, nil
 }
 
-func (r *Scene) HasSceneTeam(ctx context.Context, id id.SceneID, teams []id.TeamID) (bool, error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	s, ok := r.data[id]
-	if !ok {
-		return false, rerror.ErrNotFound
-	}
-	return s.IsTeamIncluded(teams), nil
-}
-
-func (r *Scene) HasScenesTeam(ctx context.Context, id []id.SceneID, teams []id.TeamID) ([]bool, error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	if id == nil {
-		return nil, nil
-	}
-	if len(teams) == 0 {
-		return make([]bool, len(id)), nil
-	}
-	res := make([]bool, 0, len(id))
-	for _, i := range id {
-		if teams == nil {
-			res = append(res, false)
-			continue
-		}
-		s, ok := r.data[i]
-		if !ok {
-			res = append(res, false)
-			continue
-		}
-		res = append(res, s.IsTeamIncluded(teams))
-	}
-	return res, nil
-}
-
 func (r *Scene) Save(ctx context.Context, s *scene.Scene) error {
+	if !r.f.CanWrite(s.Team()) {
+		return repo.ErrOperationDenied
+	}
+
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	s.SetUpdatedAt(time.Now())
-	r.data[s.ID()] = *s
+	r.data[s.ID()] = s
 	return nil
 }
 
-func (r *Scene) Remove(ctx context.Context, sceneID id.SceneID) error {
+func (r *Scene) Remove(ctx context.Context, id id.SceneID) error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	for sid := range r.data {
-		if sid == sceneID {
-			delete(r.data, sid)
-		}
+	if s, ok := r.data[id]; ok && r.f.CanWrite(s.Team()) {
+		delete(r.data, id)
 	}
+
 	return nil
 }

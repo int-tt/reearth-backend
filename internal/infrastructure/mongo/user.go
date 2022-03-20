@@ -23,7 +23,7 @@ func NewUser(client *mongodoc.Client) repo.User {
 }
 
 func (r *userRepo) init() {
-	i := r.client.CreateIndex(context.Background(), []string{"email", "auth0sublist"})
+	i := r.client.CreateUniqueIndex(context.Background(), []string{"email", "name", "auth0sublist"}, []string{"name"})
 	if len(i) > 0 {
 		log.Infof("mongo: %s: index created: %s", "user", i)
 	}
@@ -65,11 +65,28 @@ func (r *userRepo) FindByEmail(ctx context.Context, email string) (*user.User, e
 	return r.findOne(ctx, filter)
 }
 
+func (r *userRepo) FindByName(ctx context.Context, name string) (*user.User, error) {
+	filter := bson.D{{Key: "name", Value: name}}
+	return r.findOne(ctx, filter)
+}
+
 func (r *userRepo) FindByNameOrEmail(ctx context.Context, nameOrEmail string) (*user.User, error) {
 	filter := bson.D{{Key: "$or", Value: []bson.D{
 		{{Key: "email", Value: nameOrEmail}},
 		{{Key: "name", Value: nameOrEmail}},
 	}}}
+	return r.findOne(ctx, filter)
+}
+
+func (r *userRepo) FindByVerification(ctx context.Context, code string) (*user.User, error) {
+	filter := bson.D{{Key: "verification.code", Value: code}}
+	return r.findOne(ctx, filter)
+}
+
+func (r *userRepo) FindByPasswordResetRequest(ctx context.Context, pwdResetToken string) (*user.User, error) {
+	filter := bson.D{
+		{Key: "passwordreset.token", Value: pwdResetToken},
+	}
 	return r.findOne(ctx, filter)
 }
 

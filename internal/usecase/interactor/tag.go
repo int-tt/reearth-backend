@@ -14,7 +14,7 @@ import (
 )
 
 type Tag struct {
-	commonScene
+	common
 	tagRepo     repo.Tag
 	layerRepo   repo.Layer
 	sceneRepo   repo.Scene
@@ -23,7 +23,6 @@ type Tag struct {
 
 func NewTag(r *repo.Container) interfaces.Tag {
 	return &Tag{
-		commonScene: commonScene{sceneRepo: r.Scene},
 		tagRepo:     r.Tag,
 		layerRepo:   r.Layer,
 		sceneRepo:   r.Scene,
@@ -42,13 +41,13 @@ func (i *Tag) CreateItem(ctx context.Context, inp interfaces.CreateTagItemParam,
 		}
 	}()
 
-	if err := i.CanWriteScene(ctx, inp.SceneID, operator); err != nil {
+	if err := i.CanWriteScene(inp.SceneID, operator); err != nil {
 		return nil, nil, interfaces.ErrOperationDenied
 	}
 
 	var parent *tag.Group
 	if inp.Parent != nil {
-		parent, err = i.tagRepo.FindGroupByID(ctx, *inp.Parent, []id.SceneID{inp.SceneID})
+		parent, err = i.tagRepo.FindGroupByID(ctx, *inp.Parent)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -99,7 +98,7 @@ func (i *Tag) CreateGroup(ctx context.Context, inp interfaces.CreateTagGroupPara
 		}
 	}()
 
-	if err := i.CanWriteScene(ctx, inp.SceneID, operator); err != nil {
+	if err := i.CanWriteScene(inp.SceneID, operator); err != nil {
 		return nil, interfaces.ErrOperationDenied
 	}
 
@@ -124,39 +123,19 @@ func (i *Tag) CreateGroup(ctx context.Context, inp interfaces.CreateTagGroupPara
 }
 
 func (i *Tag) Fetch(ctx context.Context, ids []id.TagID, operator *usecase.Operator) ([]*tag.Tag, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
-	return i.tagRepo.FindByIDs(ctx, ids, scenes)
+	return i.tagRepo.FindByIDs(ctx, ids)
 }
 
 func (i *Tag) FetchByScene(ctx context.Context, sid id.SceneID, operator *usecase.Operator) ([]*tag.Tag, error) {
-	err := i.CanReadScene(ctx, sid, operator)
-	if err != nil {
-		return nil, err
-	}
-
 	return i.tagRepo.FindRootsByScene(ctx, sid)
 }
 
 func (i *Tag) FetchItem(ctx context.Context, ids []id.TagID, operator *usecase.Operator) ([]*tag.Item, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
-	return i.tagRepo.FindItemByIDs(ctx, ids, scenes)
+	return i.tagRepo.FindItemByIDs(ctx, ids)
 }
 
 func (i *Tag) FetchGroup(ctx context.Context, ids []id.TagID, operator *usecase.Operator) ([]*tag.Group, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
-	return i.tagRepo.FindGroupByIDs(ctx, ids, scenes)
+	return i.tagRepo.FindGroupByIDs(ctx, ids)
 }
 
 func (i *Tag) AttachItemToGroup(ctx context.Context, inp interfaces.AttachItemToGroupParam, operator *usecase.Operator) (*tag.Group, error) {
@@ -170,21 +149,19 @@ func (i *Tag) AttachItemToGroup(ctx context.Context, inp interfaces.AttachItemTo
 		}
 	}()
 
-	scenes, err := i.OnlyWritableScenes(ctx, operator)
+	// make sure item exist
+	ti, err := i.tagRepo.FindItemByID(ctx, inp.ItemID)
 	if err != nil {
 		return nil, err
 	}
-
-	// make sure item exist
-	ti, err := i.tagRepo.FindItemByID(ctx, inp.ItemID, scenes)
-	if err != nil {
+	if err := i.CanWriteScene(ti.Scene(), operator); err != nil {
 		return nil, err
 	}
 	if ti.Parent() != nil {
 		return nil, errors.New("tag is already added to the group")
 	}
 
-	tg, err := i.tagRepo.FindGroupByID(ctx, inp.GroupID, scenes)
+	tg, err := i.tagRepo.FindGroupByID(ctx, inp.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,18 +194,16 @@ func (i *Tag) DetachItemFromGroup(ctx context.Context, inp interfaces.DetachItem
 		}
 	}()
 
-	scenes, err := i.OnlyWritableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
 	// make sure item exist
-	ti, err := i.tagRepo.FindItemByID(ctx, inp.ItemID, scenes)
+	ti, err := i.tagRepo.FindItemByID(ctx, inp.ItemID)
 	if err != nil {
 		return nil, err
 	}
+	if err := i.CanWriteScene(ti.Scene(), operator); err != nil {
+		return nil, err
+	}
 
-	tg, err := i.tagRepo.FindGroupByID(ctx, inp.GroupID, scenes)
+	tg, err := i.tagRepo.FindGroupByID(ctx, inp.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -261,12 +236,11 @@ func (i *Tag) UpdateTag(ctx context.Context, inp interfaces.UpdateTagParam, oper
 		}
 	}()
 
-	if err := i.CanWriteScene(ctx, inp.SceneID, operator); err != nil {
-		return nil, interfaces.ErrOperationDenied
-	}
-
-	tg, err := i.tagRepo.FindByID(ctx, inp.TagID, []id.SceneID{inp.SceneID})
+	tg, err := i.tagRepo.FindByID(ctx, inp.TagID)
 	if err != nil {
+		return nil, err
+	}
+	if err := i.CanWriteScene(tg.Scene(), operator); err != nil {
 		return nil, err
 	}
 
@@ -293,13 +267,11 @@ func (i *Tag) Remove(ctx context.Context, tagID id.TagID, operator *usecase.Oper
 		}
 	}()
 
-	scenes, err := i.OnlyWritableScenes(ctx, operator)
+	t, err := i.tagRepo.FindByID(ctx, tagID)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	t, err := i.tagRepo.FindByID(ctx, tagID, scenes)
-	if err != nil {
+	if err := i.CanWriteScene(t.Scene(), operator); err != nil {
 		return nil, nil, err
 	}
 
@@ -310,7 +282,7 @@ func (i *Tag) Remove(ctx context.Context, tagID id.TagID, operator *usecase.Oper
 	}
 
 	if item := tag.ToTagItem(t); item != nil {
-		g, err := i.tagRepo.FindGroupByItem(ctx, item.ID(), scenes)
+		g, err := i.tagRepo.FindGroupByItem(ctx, item.ID())
 		if err != nil && !errors.Is(rerror.ErrNotFound, err) {
 			return nil, nil, err
 		}
@@ -322,7 +294,7 @@ func (i *Tag) Remove(ctx context.Context, tagID id.TagID, operator *usecase.Oper
 		}
 	}
 
-	ls, err := i.layerRepo.FindByTag(ctx, tagID, scenes)
+	ls, err := i.layerRepo.FindByTag(ctx, tagID)
 	if err != nil && !errors.Is(rerror.ErrNotFound, err) {
 		return nil, nil, err
 	}

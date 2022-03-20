@@ -1,9 +1,12 @@
 package app
 
 import (
+	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/pprof"
+	"os"
 
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/labstack/echo/v4"
@@ -14,7 +17,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 )
 
-func initEcho(cfg *ServerConfig) *echo.Echo {
+func initEcho(ctx context.Context, cfg *ServerConfig) *echo.Echo {
 	if cfg.Config == nil {
 		log.Fatalln("ServerConfig.Config is nil")
 	}
@@ -23,12 +26,16 @@ func initEcho(cfg *ServerConfig) *echo.Echo {
 	e.Debug = cfg.Debug
 	e.HideBanner = true
 	e.HidePort = true
+	e.HTTPErrorHandler = errorHandler(e.DefaultHTTPErrorHandler)
 
+	// basic middleware
 	logger := GetEchoLogger()
 	e.Logger = logger
-	e.Use(logger.Hook())
-
-	e.Use(middleware.Recover(), otelecho.Middleware("reearth-backend"))
+	e.Use(
+		logger.Hook(),
+		middleware.Recover(),
+		otelecho.Middleware("reearth-backend"),
+	)
 	origins := allowedOrigins(cfg)
 	if len(origins) > 0 {
 		e.Use(
@@ -38,8 +45,14 @@ func initEcho(cfg *ServerConfig) *echo.Echo {
 		)
 	}
 
+	e.Use(
+		jwtEchoMiddleware(cfg),
+		parseJwtMiddleware(),
+		authMiddleware(cfg),
+	)
+
+	// enable pprof
 	if e.Debug {
-		// enable pprof
 		pprofGroup := e.Group("/debug/pprof")
 		pprofGroup.Any("/cmdline", echo.WrapHandler(http.HandlerFunc(pprof.Cmdline)))
 		pprofGroup.Any("/profile", echo.WrapHandler(http.HandlerFunc(pprof.Profile)))
@@ -48,7 +61,63 @@ func initEcho(cfg *ServerConfig) *echo.Echo {
 		pprofGroup.Any("/*", echo.WrapHandler(http.HandlerFunc(pprof.Index)))
 	}
 
-	e.HTTPErrorHandler = func(err error, c echo.Context) {
+	// GraphQL Playground without auth
+	if cfg.Debug || cfg.Config.Dev {
+		e.GET("/graphql", echo.WrapHandler(
+			playground.Handler("reearth-backend", "/api/graphql"),
+		))
+	}
+
+	// init usecases
+	var publishedIndexHTML string
+	if cfg.Config.Published.IndexURL == nil || cfg.Config.Published.IndexURL.String() == "" {
+		if html, err := fs.ReadFile(os.DirFS("."), "web/published.html"); err == nil {
+			publishedIndexHTML = string(html)
+		}
+	}
+
+	e.Use(UsecaseMiddleware(cfg.Repos, cfg.Gateways, interactor.ContainerConfig{
+		SignupSecret:       cfg.Config.SignupSecret,
+		PublishedIndexHTML: publishedIndexHTML,
+		PublishedIndexURL:  cfg.Config.Published.IndexURL,
+		AuthSrvUIDomain:    cfg.Config.AuthSrv.UIDomain,
+	}))
+
+	// auth srv
+	if !cfg.Config.AuthSrv.Disabled {
+		auth := e.Group("")
+		authEndPoints(ctx, e, auth, cfg)
+	}
+
+	// apis
+	api := e.Group("/api")
+	api.GET("/ping", Ping())
+	if !cfg.Config.AuthSrv.Disabled {
+		api.POST("/signup", Signup())
+		api.POST("/signup/verify", StartSignupVerify())
+		api.POST("/signup/verify/:code", SignupVerify())
+		api.POST("/password-reset", PasswordReset())
+	}
+	api.GET("/published/:name", PublishedMetadata())
+	api.GET("/published_data/:name", PublishedData())
+
+	// authenticated endpoints
+	privateApi := api.Group("", AuthRequiredMiddleware())
+	graphqlAPI(e, privateApi, cfg)
+	privateAPI(e, privateApi, cfg.Repos)
+
+	published := e.Group("/p", PublishedAuthMiddleware())
+	published.GET("/:name/data.json", PublishedData())
+	published.GET("/:name/", PublishedIndex())
+
+	serveFiles(e, cfg.Gateways.File)
+	web(e, cfg.Config.Web, cfg.Config.Auths())
+
+	return e
+}
+
+func errorHandler(next func(error, echo.Context)) func(error, echo.Context) {
+	return func(err error, c echo.Context) {
 		if c.Response().Committed {
 			return
 		}
@@ -59,42 +128,9 @@ func initEcho(cfg *ServerConfig) *echo.Echo {
 		if err := c.JSON(code, map[string]string{
 			"error": msg,
 		}); err != nil {
-			e.DefaultHTTPErrorHandler(err, c)
+			next(err, c)
 		}
 	}
-
-	if cfg.Debug || cfg.Config.Dev {
-		// GraphQL Playground without auth
-		e.GET("/graphql", echo.WrapHandler(
-			playground.Handler("reearth-backend", "/api/graphql"),
-		))
-	}
-
-	usecases := interactor.NewContainer(cfg.Repos, cfg.Gateways, interactor.ContainerConfig{
-		SignupSecret: cfg.Config.SignupSecret,
-	})
-
-	api := e.Group("/api")
-	publicAPI(e, api, cfg.Config, cfg.Repos, cfg.Gateways)
-	jwks := &JwksSyncOnce{}
-	privateApi := api.Group("")
-	authRequired(privateApi, jwks, cfg)
-	graphqlAPI(e, privateApi, cfg, usecases)
-	privateAPI(e, privateApi, cfg.Repos)
-
-	published := e.Group("/p")
-	publishedRoute(e, published, cfg.Config, cfg.Repos, cfg.Gateways)
-
-	serveFiles(e, cfg.Gateways.File)
-	web(e, cfg.Config.Web, cfg.Config.Auth0)
-
-	return e
-}
-
-func authRequired(g *echo.Group, jwks Jwks, cfg *ServerConfig) {
-	g.Use(jwtEchoMiddleware(jwks, cfg))
-	g.Use(parseJwtMiddleware(cfg))
-	g.Use(authMiddleware(cfg))
 }
 
 func allowedOrigins(cfg *ServerConfig) []string {

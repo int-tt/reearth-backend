@@ -33,15 +33,14 @@ func TestProperty_AddItem(t *testing.T) {
 	_ = memory.Property.Save(ctx, p)
 
 	uc := &Property{
-		commonScene:        commonScene{sceneRepo: memory.Scene},
 		commonSceneLock:    commonSceneLock{sceneLockRepo: memory.SceneLock},
 		propertyRepo:       memory.Property,
 		propertySchemaRepo: memory.PropertySchema,
 		transaction:        memory.Transaction,
 	}
 	op := &usecase.Operator{
-		ReadableTeams: []id.TeamID{team},
-		WritableTeams: []id.TeamID{team},
+		ReadableScenes: []id.SceneID{scene.ID()},
+		WritableScenes: []id.SceneID{scene.ID()},
 	}
 
 	index := -1
@@ -62,7 +61,7 @@ func TestProperty_AddItem(t *testing.T) {
 	assert.Equal(t, npg, npl.GroupAt(0))
 	assert.Equal(t, 1, len(npl.Groups()))
 
-	np2, _ := memory.Property.FindByID(ctx, p.ID(), nil)
+	np2, _ := memory.Property.FindByID(ctx, p.ID())
 	assert.Equal(t, np, np2)
 }
 
@@ -86,15 +85,14 @@ func TestProperty_RemoveItem(t *testing.T) {
 	_ = memory.Property.Save(ctx, p)
 
 	uc := &Property{
-		commonScene:        commonScene{sceneRepo: memory.Scene},
 		commonSceneLock:    commonSceneLock{sceneLockRepo: memory.SceneLock},
 		propertyRepo:       memory.Property,
 		propertySchemaRepo: memory.PropertySchema,
 		transaction:        memory.Transaction,
 	}
 	op := &usecase.Operator{
-		ReadableTeams: []id.TeamID{team},
-		WritableTeams: []id.TeamID{team},
+		ReadableScenes: []id.SceneID{scene.ID()},
+		WritableScenes: []id.SceneID{scene.ID()},
 	}
 
 	np, err := uc.RemoveItem(ctx, interfaces.RemovePropertyItemParam{
@@ -108,7 +106,7 @@ func TestProperty_RemoveItem(t *testing.T) {
 	npl := property.ToGroupList(np.ItemBySchema(psg.ID()))
 	assert.Equal(t, 0, len(npl.Groups()))
 
-	np2, _ := memory.Property.FindByID(ctx, p.ID(), nil)
+	np2, _ := memory.Property.FindByID(ctx, p.ID())
 	assert.Equal(t, np, np2)
 }
 
@@ -131,15 +129,15 @@ func TestProperty_UpdateValue_FieldOfGroupInList(t *testing.T) {
 	_ = memory.Property.Save(ctx, p)
 
 	uc := &Property{
-		commonScene:        commonScene{sceneRepo: memory.Scene},
 		commonSceneLock:    commonSceneLock{sceneLockRepo: memory.SceneLock},
+		sceneRepo:          memory.Scene,
 		propertyRepo:       memory.Property,
 		propertySchemaRepo: memory.PropertySchema,
 		transaction:        memory.Transaction,
 	}
 	op := &usecase.Operator{
-		ReadableTeams: []id.TeamID{team},
-		WritableTeams: []id.TeamID{team},
+		WritableTeams:  []id.TeamID{team},
+		WritableScenes: []id.SceneID{scene.ID()},
 	}
 
 	np, npl, npg, npf, err := uc.UpdateValue(ctx, interfaces.UpdatePropertyValueParam{
@@ -161,6 +159,6 @@ func TestProperty_UpdateValue_FieldOfGroupInList(t *testing.T) {
 	assert.Equal(t, psf.ID(), npf.Field())
 	assert.Equal(t, property.ValueTypeString.ValueFrom("aaaa"), npf.Value())
 
-	np2, _ := memory.Property.FindByID(ctx, p.ID(), nil)
+	np2, _ := memory.Property.FindByID(ctx, p.ID())
 	assert.Equal(t, np, np2)
 }

@@ -26,7 +26,7 @@ import (
 var extensionForLinkedLayers = id.PluginExtensionID("marker")
 
 type Dataset struct {
-	commonScene
+	common
 	commonSceneLock
 	datasetRepo       repo.Dataset
 	datasetSchemaRepo repo.DatasetSchema
@@ -41,7 +41,6 @@ type Dataset struct {
 
 func NewDataset(r *repo.Container, gr *gateway.Container) interfaces.Dataset {
 	return &Dataset{
-		commonScene:       commonScene{sceneRepo: r.Scene},
 		commonSceneLock:   commonSceneLock{sceneLockRepo: r.SceneLock},
 		datasetRepo:       r.Dataset,
 		datasetSchemaRepo: r.DatasetSchema,
@@ -64,11 +63,7 @@ func (i *Dataset) DynamicSchemaFields() []*dataset.SchemaField {
 }
 
 func (i *Dataset) UpdateDatasetSchema(ctx context.Context, inp interfaces.UpdateDatasetSchemaParam, operator *usecase.Operator) (_ *dataset.Schema, err error) {
-	scenes, err := i.OnlyWritableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-	schema, err := i.datasetSchemaRepo.FindByID(ctx, inp.SchemaId, scenes)
+	schema, err := i.datasetSchemaRepo.FindByID(ctx, inp.SchemaId)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +91,6 @@ func (i *Dataset) UpdateDatasetSchema(ctx context.Context, inp interfaces.Update
 }
 
 func (i *Dataset) AddDynamicDatasetSchema(ctx context.Context, inp interfaces.AddDynamicDatasetSchemaParam) (_ *dataset.Schema, err error) {
-
 	// Begin Db transaction
 	tx, err := i.transaction.Begin()
 	if err != nil {
@@ -180,7 +174,7 @@ func (i *Dataset) AddDynamicDataset(ctx context.Context, inp interfaces.AddDynam
 }
 
 func (i *Dataset) ImportDataset(ctx context.Context, inp interfaces.ImportDatasetParam, operator *usecase.Operator) (_ *dataset.Schema, err error) {
-	if err := i.CanWriteScene(ctx, inp.SceneId, operator); err != nil {
+	if err := i.CanWriteScene(inp.SceneId, operator); err != nil {
 		return nil, err
 	}
 	if inp.File == nil {
@@ -196,7 +190,7 @@ func (i *Dataset) ImportDataset(ctx context.Context, inp interfaces.ImportDatase
 }
 
 func (i *Dataset) ImportDatasetFromGoogleSheet(ctx context.Context, inp interfaces.ImportDatasetFromGoogleSheetParam, operator *usecase.Operator) (_ *dataset.Schema, err error) {
-	if err := i.CanWriteScene(ctx, inp.SceneId, operator); err != nil {
+	if err := i.CanWriteScene(inp.SceneId, operator); err != nil {
 		return nil, err
 	}
 
@@ -225,7 +219,6 @@ func (i *Dataset) importDataset(ctx context.Context, content io.Reader, name str
 		}
 	}()
 
-	scenes := []id.SceneID{sceneId}
 	csv := dataset.NewCSVParser(content, name, separator)
 	err = csv.Init()
 	if err != nil {
@@ -234,7 +227,7 @@ func (i *Dataset) importDataset(ctx context.Context, content io.Reader, name str
 
 	// replacment mode
 	if schemaId != nil {
-		dss, err := i.datasetSchemaRepo.FindByID(ctx, *schemaId, scenes)
+		dss, err := i.datasetSchemaRepo.FindByID(ctx, *schemaId)
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +278,7 @@ func (i *Dataset) importDataset(ctx context.Context, content io.Reader, name str
 
 		for _, lg := range layergroups {
 			if lg.Layers().LayerCount() > 0 {
-				children, err := i.layerRepo.FindByIDs(ctx, lg.Layers().Layers(), scenes)
+				children, err := i.layerRepo.FindByIDs(ctx, lg.Layers().Layers())
 				if err != nil {
 					return nil, err
 				}
@@ -349,18 +342,10 @@ func (i *Dataset) importDataset(ctx context.Context, content io.Reader, name str
 }
 
 func (i *Dataset) Fetch(ctx context.Context, ids []id.DatasetID, operator *usecase.Operator) (dataset.List, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-	return i.datasetRepo.FindByIDs(ctx, ids, scenes)
+	return i.datasetRepo.FindByIDs(ctx, ids)
 }
 
 func (i *Dataset) GraphFetch(ctx context.Context, id id.DatasetID, depth int, operator *usecase.Operator) (dataset.List, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
 	if depth < 0 || depth > 3 {
 		return nil, interfaces.ErrDatasetInvalidDepth
 	}
@@ -369,7 +354,7 @@ func (i *Dataset) GraphFetch(ctx context.Context, id id.DatasetID, depth int, op
 	next := id
 	done := false
 	for {
-		d, err := i.datasetRepo.FindByID(ctx, next, scenes)
+		d, err := i.datasetRepo.FindByID(ctx, next)
 		if err != nil {
 			return nil, err
 		}
@@ -386,20 +371,10 @@ func (i *Dataset) GraphFetch(ctx context.Context, id id.DatasetID, depth int, op
 }
 
 func (i *Dataset) FetchSchema(ctx context.Context, ids []id.DatasetSchemaID, operator *usecase.Operator) (dataset.SchemaList, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
-	return i.datasetSchemaRepo.FindByIDs(ctx, ids, scenes)
+	return i.datasetSchemaRepo.FindByIDs(ctx, ids)
 }
 
 func (i *Dataset) GraphFetchSchema(ctx context.Context, id id.DatasetSchemaID, depth int, operator *usecase.Operator) (dataset.SchemaList, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
 	if depth < 0 || depth > 3 {
 		return nil, interfaces.ErrDatasetInvalidDepth
 	}
@@ -409,7 +384,7 @@ func (i *Dataset) GraphFetchSchema(ctx context.Context, id id.DatasetSchemaID, d
 	next := id
 	done := false
 	for {
-		d, err := i.datasetSchemaRepo.FindByID(ctx, next, scenes)
+		d, err := i.datasetSchemaRepo.FindByID(ctx, next)
 		if err != nil {
 			return nil, err
 		}
@@ -427,16 +402,11 @@ func (i *Dataset) GraphFetchSchema(ctx context.Context, id id.DatasetSchemaID, d
 }
 
 func (i *Dataset) FindBySchema(ctx context.Context, ds id.DatasetSchemaID, p *usecase.Pagination, operator *usecase.Operator) (dataset.List, *usecase.PageInfo, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return i.datasetRepo.FindBySchema(ctx, ds, scenes, p)
+	return i.datasetRepo.FindBySchema(ctx, ds, p)
 }
 
 func (i *Dataset) FindSchemaByScene(ctx context.Context, sid id.SceneID, p *usecase.Pagination, operator *usecase.Operator) (dataset.SchemaList, *usecase.PageInfo, error) {
-	if err := i.CanReadScene(ctx, sid, operator); err != nil {
+	if err := i.CanReadScene(sid, operator); err != nil {
 		return nil, nil, err
 	}
 
@@ -448,7 +418,7 @@ func (i *Dataset) FindDynamicSchemaByScene(ctx context.Context, sid id.SceneID) 
 }
 
 func (i *Dataset) Sync(ctx context.Context, sceneID id.SceneID, url string, operator *usecase.Operator) (dss dataset.SchemaList, ds dataset.List, err error) {
-	if err := i.CanWriteScene(ctx, sceneID, operator); err != nil {
+	if err := i.CanWriteScene(sceneID, operator); err != nil {
 		return nil, nil, err
 	}
 
@@ -525,7 +495,7 @@ func (i *Dataset) Sync(ctx context.Context, sceneID id.SceneID, url string, oper
 }
 
 func (i *Dataset) AddDatasetSchema(ctx context.Context, inp interfaces.AddDatasetSchemaParam, operator *usecase.Operator) (ds *dataset.Schema, err error) {
-	if err := i.CanWriteScene(ctx, inp.SceneId, operator); err != nil {
+	if err := i.CanWriteScene(inp.SceneId, operator); err != nil {
 		return nil, err
 	}
 
@@ -560,28 +530,23 @@ func (i *Dataset) AddDatasetSchema(ctx context.Context, inp interfaces.AddDatase
 }
 
 func (i *Dataset) RemoveDatasetSchema(ctx context.Context, inp interfaces.RemoveDatasetSchemaParam, operator *usecase.Operator) (_ id.DatasetSchemaID, err error) {
-	if operator == nil {
-		return inp.SchemaId, interfaces.ErrOperationDenied
-	}
-	scenes, err := i.sceneRepo.FindIDsByTeam(ctx, operator.WritableTeams)
+	s, err := i.datasetSchemaRepo.FindByID(ctx, inp.SchemaID)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
-	s, err := i.datasetSchemaRepo.FindByID(ctx, inp.SchemaId, scenes)
-	if err != nil {
-		return inp.SchemaId, err
-	}
-
 	if s == nil {
-		return inp.SchemaId, rerror.ErrNotFound
+		return inp.SchemaID, rerror.ErrNotFound
+	}
+	if err := i.CanWriteScene(s.Scene(), operator); err != nil {
+		return inp.SchemaID, err
 	}
 
-	datasets, err := i.datasetRepo.FindBySchemaAll(ctx, inp.SchemaId)
+	datasets, err := i.datasetRepo.FindBySchemaAll(ctx, inp.SchemaID)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 	if (inp.Force == nil || !*inp.Force) && len(datasets) != 0 {
-		return inp.SchemaId, errors.New("can not remove non-empty schema")
+		return inp.SchemaID, errors.New("can not remove non-empty schema")
 	}
 
 	// Begin Db transaction
@@ -599,23 +564,23 @@ func (i *Dataset) RemoveDatasetSchema(ctx context.Context, inp interfaces.Remove
 	dsids := []id.DatasetID{}
 	var properties []*property.Property
 	for _, d := range datasets {
-		properties, err = i.propertyRepo.FindByDataset(ctx, inp.SchemaId, d.ID())
+		properties, err = i.propertyRepo.FindByDataset(ctx, inp.SchemaID, d.ID())
 		if err != nil {
-			return inp.SchemaId, err
+			return inp.SchemaID, err
 		}
 
 		for _, p := range properties {
 			// unlinking fields
-			p.UnlinkAllByDataset(inp.SchemaId, d.ID())
+			p.UnlinkAllByDataset(inp.SchemaID, d.ID())
 		}
 
 		dsids = append(dsids, d.ID())
 	}
 
 	// unlink layers (items and groups) and save
-	layers, err := i.layerRepo.FindAllByDatasetSchema(ctx, inp.SchemaId)
+	layers, err := i.layerRepo.FindAllByDatasetSchema(ctx, inp.SchemaID)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 
 	for _, li := range layers.ToLayerItemList() {
@@ -625,9 +590,9 @@ func (i *Dataset) RemoveDatasetSchema(ctx context.Context, inp interfaces.Remove
 	for _, lg := range layers.ToLayerGroupList() {
 		lg.Unlink()
 
-		groupItems, err := i.layerRepo.FindItemByIDs(ctx, lg.Layers().Layers(), scenes)
+		groupItems, err := i.layerRepo.FindItemByIDs(ctx, lg.Layers().Layers())
 		if err != nil {
-			return inp.SchemaId, err
+			return inp.SchemaID, err
 		}
 
 		// unlink layers group items
@@ -641,24 +606,24 @@ func (i *Dataset) RemoveDatasetSchema(ctx context.Context, inp interfaces.Remove
 
 	err = i.propertyRepo.SaveAll(ctx, properties)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 
 	err = i.layerRepo.SaveAll(ctx, layers)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 
 	err = i.datasetRepo.RemoveAll(ctx, dsids)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 
-	err = i.datasetSchemaRepo.Remove(ctx, inp.SchemaId)
+	err = i.datasetSchemaRepo.Remove(ctx, inp.SchemaID)
 	if err != nil {
-		return inp.SchemaId, err
+		return inp.SchemaID, err
 	}
 
 	tx.Commit()
-	return inp.SchemaId, nil
+	return inp.SchemaID, nil
 }

@@ -13,7 +13,7 @@ import (
 
 type Plugin struct {
 	common
-	commonScene
+	sceneRepo          repo.Scene
 	pluginRepo         repo.Plugin
 	propertySchemaRepo repo.PropertySchema
 	propertyRepo       repo.Property
@@ -26,9 +26,7 @@ type Plugin struct {
 
 func NewPlugin(r *repo.Container, gr *gateway.Container) interfaces.Plugin {
 	return &Plugin{
-		commonScene: commonScene{
-			sceneRepo: r.Scene,
-		},
+		sceneRepo:          r.Scene,
 		layerRepo:          r.Layer,
 		pluginRepo:         r.Plugin,
 		propertySchemaRepo: r.PropertySchema,
@@ -41,24 +39,12 @@ func NewPlugin(r *repo.Container, gr *gateway.Container) interfaces.Plugin {
 }
 
 func (i *Plugin) Fetch(ctx context.Context, ids []id.PluginID, operator *usecase.Operator) ([]*plugin.Plugin, error) {
-	scenes, err := i.OnlyReadableScenes(ctx, operator)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := i.pluginRepo.FindByIDs(ctx, ids, scenes)
-	return res, err
+	return i.pluginRepo.FindByIDs(ctx, ids)
 }
 
 func (i *Plugin) FetchPluginMetadata(ctx context.Context, operator *usecase.Operator) ([]*plugin.Metadata, error) {
 	if err := i.OnlyOperator(operator); err != nil {
 		return nil, err
 	}
-
-	res, err := i.pluginRegistry.FetchMetadata(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return res, nil
+	return i.pluginRegistry.FetchMetadata(ctx)
 }

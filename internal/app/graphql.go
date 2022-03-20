@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"github.com/ravilushqa/otelgqlgen"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -9,10 +10,8 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler/lru"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/labstack/echo/v4"
-	"github.com/ravilushqa/otelgqlgen"
 	"github.com/reearth/reearth-backend/internal/adapter"
 	"github.com/reearth/reearth-backend/internal/adapter/gql"
-	"github.com/reearth/reearth-backend/internal/usecase/interfaces"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
@@ -22,7 +21,6 @@ func graphqlAPI(
 	ec *echo.Echo,
 	r *echo.Group,
 	conf *ServerConfig,
-	usecases interfaces.Container,
 ) {
 	playgroundEnabled := conf.Debug || conf.Config.Dev
 
@@ -38,7 +36,6 @@ func graphqlAPI(
 
 	srv := handler.NewDefaultServer(schema)
 	srv.Use(otelgqlgen.Middleware())
-
 	if conf.Config.GraphQL.ComplexityLimit > 0 {
 		srv.Use(extension.FixedComplexityLimit(conf.Config.GraphQL.ComplexityLimit))
 	}
@@ -65,8 +62,8 @@ func graphqlAPI(
 		req := c.Request()
 		ctx := req.Context()
 
-		ctx = adapter.AttachUsecases(ctx, &usecases)
-		ctx = gql.AttachUsecases(ctx, &usecases, enableDataLoaders)
+		usecases := adapter.Usecases(ctx)
+		ctx = gql.AttachUsecases(ctx, usecases, enableDataLoaders)
 		c.SetRequest(req.WithContext(ctx))
 
 		srv.ServeHTTP(c.Response(), c.Request())
