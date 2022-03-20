@@ -78,30 +78,24 @@ func (i *Layer) FetchByProperty(ctx context.Context, pid id.PropertyID, operator
 }
 
 func (i *Layer) FetchMerged(ctx context.Context, org id.LayerID, parent *id.LayerID, operator *usecase.Operator) (*layer.Merged, error) {
-	ids := []id.LayerID{org}
-	if parent != nil {
-		ids = append(ids, *parent)
-	}
-	layers, err := i.layerRepo.FindByIDs(ctx, ids)
+	var orgLayer, parentLayer layer.Layer
+	var err error
+	var orgl *layer.Item
+	var parentl *layer.Group
+
+	orgLayer, err = i.layerRepo.FindByID(ctx, org)
 	if err != nil {
 		return nil, err
 	}
-	layers2 := []*layer.Layer(layers)
+	orgl = layer.ToLayerItemRef(&orgLayer)
 
-	var orgl *layer.Item
-	var parentl *layer.Group
-	if parent != nil && len(layers2) == 2 {
-		l := layers2[0]
-		orgl = layer.ToLayerItemRef(l)
-		l = layers2[1]
-		parentl = layer.ToLayerGroupRef(l)
-	} else if parent == nil && len(layers2) == 1 {
-		l := layers2[0]
-		if l != nil {
-			orgl = layer.ToLayerItemRef(l)
+	if parent != nil {
+		parentLayer, err = i.layerRepo.FindByID(ctx, *parent)
+		if err != nil {
+			return nil, err
 		}
+		parentl = layer.ToLayerGroup(parentLayer)
 	}
-
 	return layer.Merge(orgl, parentl), nil
 }
 

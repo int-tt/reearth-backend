@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/reearth/reearth-backend/pkg/id"
-	"github.com/reearth/reearth-backend/pkg/layer"
+	"github.com/reearth/reearth-backend/pkg/property"
 )
 
-// LayerLoaderConfig captures the config to create a new LayerLoader
-type LayerLoaderConfig struct {
+// PropertyLoaderConfig captures the config to create a new PropertyLoader
+type PropertyLoaderConfig struct {
 	// Fetch is a method that provides the data for the loader
-	Fetch func(keys []*id.LayerID) ([]layer.Layer, []error)
+	Fetch func(keys []*id.PropertyID) ([]*property.Property, []error)
 
 	// Wait is how long wait before sending a batch
 	Wait time.Duration
@@ -22,19 +22,19 @@ type LayerLoaderConfig struct {
 	MaxBatch int
 }
 
-// NewLayerLoader creates a new LayerLoader given a fetch, wait, and maxBatch
-func NewLayerLoader(config LayerLoaderConfig) *LayerLoader {
-	return &LayerLoader{
+// NewPropertyLoader creates a new PropertyLoader given a fetch, wait, and maxBatch
+func NewPropertyLoader(config PropertyLoaderConfig) *PropertyLoader {
+	return &PropertyLoader{
 		fetch:    config.Fetch,
 		wait:     config.Wait,
 		maxBatch: config.MaxBatch,
 	}
 }
 
-// LayerLoader batches and caches requests
-type LayerLoader struct {
+// PropertyLoader batches and caches requests
+type PropertyLoader struct {
 	// this method provides the data for the loader
-	fetch func(keys []*id.LayerID) ([]layer.Layer, []error)
+	fetch func(keys []*id.PropertyID) ([]*property.Property, []error)
 
 	// how long to done before sending a batch
 	wait time.Duration
@@ -45,51 +45,51 @@ type LayerLoader struct {
 	// INTERNAL
 
 	// lazily created cache
-	cache map[*id.LayerID]layer.Layer
+	cache map[*id.PropertyID]*property.Property
 
 	// the current batch. keys will continue to be collected until timeout is hit,
 	// then everything will be sent to the fetch method and out to the listeners
-	batch *layerLoaderBatch
+	batch *propertyLoaderBatch
 
 	// mutex to prevent races
 	mu sync.Mutex
 }
 
-type layerLoaderBatch struct {
-	keys    []*id.LayerID
-	data    []layer.Layer
+type propertyLoaderBatch struct {
+	keys    []*id.PropertyID
+	data    []*property.Property
 	error   []error
 	closing bool
 	done    chan struct{}
 }
 
-// Load a Layer by key, batching and caching will be applied automatically
-func (l *LayerLoader) Load(key *id.LayerID) (layer.Layer, error) {
+// Load a Property by key, batching and caching will be applied automatically
+func (l *PropertyLoader) Load(key *id.PropertyID) (*property.Property, error) {
 	return l.LoadThunk(key)()
 }
 
-// LoadThunk returns a function that when called will block waiting for a Layer.
+// LoadThunk returns a function that when called will block waiting for a Property.
 // This method should be used if you want one goroutine to make requests to many
 // different data loaders without blocking until the thunk is called.
-func (l *LayerLoader) LoadThunk(key *id.LayerID) func() (layer.Layer, error) {
+func (l *PropertyLoader) LoadThunk(key *id.PropertyID) func() (*property.Property, error) {
 	l.mu.Lock()
 	if it, ok := l.cache[key]; ok {
 		l.mu.Unlock()
-		return func() (layer.Layer, error) {
+		return func() (*property.Property, error) {
 			return it, nil
 		}
 	}
 	if l.batch == nil {
-		l.batch = &layerLoaderBatch{done: make(chan struct{})}
+		l.batch = &propertyLoaderBatch{done: make(chan struct{})}
 	}
 	batch := l.batch
 	pos := batch.keyIndex(l, key)
 	l.mu.Unlock()
 
-	return func() (layer.Layer, error) {
+	return func() (*property.Property, error) {
 		<-batch.done
 
-		var data layer.Layer
+		var data *property.Property
 		if pos < len(batch.data) {
 			data = batch.data[pos]
 		}
@@ -114,69 +114,72 @@ func (l *LayerLoader) LoadThunk(key *id.LayerID) func() (layer.Layer, error) {
 
 // LoadAll fetches many keys at once. It will be broken into appropriate sized
 // sub batches depending on how the loader is configured
-func (l *LayerLoader) LoadAll(keys []*id.LayerID) ([]layer.Layer, []error) {
-	results := make([]func() (layer.Layer, error), len(keys))
+func (l *PropertyLoader) LoadAll(keys []*id.PropertyID) ([]*property.Property, []error) {
+	results := make([]func() (*property.Property, error), len(keys))
 
 	for i, key := range keys {
 		results[i] = l.LoadThunk(key)
 	}
 
-	layers := make([]layer.Layer, len(keys))
+	propertys := make([]*property.Property, len(keys))
 	errors := make([]error, len(keys))
 	for i, thunk := range results {
-		layers[i], errors[i] = thunk()
+		propertys[i], errors[i] = thunk()
 	}
-	return layers, errors
+	return propertys, errors
 }
 
-// LoadAllThunk returns a function that when called will block waiting for a Layers.
+// LoadAllThunk returns a function that when called will block waiting for a Propertys.
 // This method should be used if you want one goroutine to make requests to many
 // different data loaders without blocking until the thunk is called.
-func (l *LayerLoader) LoadAllThunk(keys []*id.LayerID) func() ([]layer.Layer, []error) {
-	results := make([]func() (layer.Layer, error), len(keys))
+func (l *PropertyLoader) LoadAllThunk(keys []*id.PropertyID) func() ([]*property.Property, []error) {
+	results := make([]func() (*property.Property, error), len(keys))
 	for i, key := range keys {
 		results[i] = l.LoadThunk(key)
 	}
-	return func() ([]layer.Layer, []error) {
-		layers := make([]layer.Layer, len(keys))
+	return func() ([]*property.Property, []error) {
+		propertys := make([]*property.Property, len(keys))
 		errors := make([]error, len(keys))
 		for i, thunk := range results {
-			layers[i], errors[i] = thunk()
+			propertys[i], errors[i] = thunk()
 		}
-		return layers, errors
+		return propertys, errors
 	}
 }
 
 // Prime the cache with the provided key and value. If the key already exists, no change is made
 // and false is returned.
 // (To forcefully prime the cache, clear the key first with loader.clear(key).prime(key, value).)
-func (l *LayerLoader) Prime(key *id.LayerID, value layer.Layer) bool {
+func (l *PropertyLoader) Prime(key *id.PropertyID, value *property.Property) bool {
 	l.mu.Lock()
 	var found bool
 	if _, found = l.cache[key]; !found {
-		l.unsafeSet(key, value)
+		// make a copy when writing to the cache, its easy to pass a pointer in from a loop var
+		// and end up with the whole cache pointing to the same value.
+		cpy := *value
+		l.unsafeSet(key, &cpy)
 	}
 	l.mu.Unlock()
 	return !found
 }
 
 // Clear the value at key from the cache, if it exists
-func (l *LayerLoader) Clear(key *id.LayerID) {
+func (l *PropertyLoader) Clear(key *id.PropertyID) {
 	l.mu.Lock()
 	delete(l.cache, key)
 	l.mu.Unlock()
 }
 
-func (l *LayerLoader) unsafeSet(key *id.LayerID, value layer.Layer) {
+func (l *PropertyLoader) unsafeSet(key *id.PropertyID, value *property.Property) {
 	if l.cache == nil {
-		l.cache = map[*id.LayerID]layer.Layer{}
+		l.cache = map[*id.PropertyID]*property.Property{}
 	}
 	l.cache[key] = value
 }
 
 // keyIndex will return the location of the key in the batch, if its not found
 // it will add the key to the batch
-func (b *layerLoaderBatch) keyIndex(l *LayerLoader, key *id.LayerID) int {
+func (b *propertyLoaderBatch) keyIndex(l *PropertyLoader, key *id.PropertyID) int {
 	for i, existingKey := range b.keys {
 		if key == existingKey {
 			return i
@@ -200,7 +203,7 @@ func (b *layerLoaderBatch) keyIndex(l *LayerLoader, key *id.LayerID) int {
 	return pos
 }
 
-func (b *layerLoaderBatch) startTimer(l *LayerLoader) {
+func (b *propertyLoaderBatch) startTimer(l *PropertyLoader) {
 	time.Sleep(l.wait)
 	l.mu.Lock()
 
@@ -216,7 +219,7 @@ func (b *layerLoaderBatch) startTimer(l *LayerLoader) {
 	b.end(l)
 }
 
-func (b *layerLoaderBatch) end(l *LayerLoader) {
+func (b *propertyLoaderBatch) end(l *PropertyLoader) {
 	b.data, b.error = l.fetch(b.keys)
 	close(b.done)
 }

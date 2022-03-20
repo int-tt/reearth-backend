@@ -82,6 +82,7 @@ func initReposAndGateways(ctx context.Context, conf *Config, debug bool) (*repo.
 
 	// TEMP
 	repos.Layer = &mongorepo.LayerDataLoader{Layer: repos.Layer}
+	repos.Property = &mongorepo.PropertyDataLoader{Property: repos.Property}
 	return repos, gateways
 }
 

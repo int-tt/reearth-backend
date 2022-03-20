@@ -42,7 +42,16 @@ func NewProperty(r *repo.Container, gr *gateway.Container) interfaces.Property {
 }
 
 func (i *Property) Fetch(ctx context.Context, ids []id.PropertyID, operator *usecase.Operator) ([]*property.Property, error) {
-	return i.propertyRepo.FindByIDs(ctx, ids)
+	//fmt.Printf("InteractorFetch: %#v\n", ids)
+	propsIDs := make([]*property.Property, 0, len(ids))
+	for _, id := range ids {
+		props, err := i.propertyRepo.FindByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		propsIDs = append(propsIDs, props)
+	}
+	return propsIDs, nil
 }
 
 func (i *Property) FetchSchema(ctx context.Context, ids []id.PropertySchemaID, operator *usecase.Operator) ([]*property.Schema, error) {
@@ -50,27 +59,40 @@ func (i *Property) FetchSchema(ctx context.Context, ids []id.PropertySchemaID, o
 }
 
 func (i *Property) FetchMerged(ctx context.Context, org, parent *id.PropertyID, linked *id.DatasetID, operator *usecase.Operator) (*property.Merged, error) {
-	ids := []id.PropertyID{}
+	//ids := []id.PropertyID{}
+	var orgp, parentp *property.Property
+	var err error
 	if org != nil {
-		ids = append(ids, *org)
+		orgp, err = i.propertyRepo.FindByID(ctx, *org)
+		if err != nil {
+			return nil, err
+		}
+
+		//ids = append(ids, *org)
 	}
 	if parent != nil {
-		ids = append(ids, *parent)
+		parentp, err = i.propertyRepo.FindByID(ctx, *parent)
+		if err != nil {
+			return nil, err
+		}
+		//ids = append(ids, *parent)
 	}
-	props, err := i.propertyRepo.FindByIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
+	//fmt.Printf("FetchMerged PropertyIds: %#v\n", ids)
+	//props, err := i.propertyRepo.FindByIDs(ctx, ids)
+	//
+	//if err != nil {
+	//	return nil, err
+	//}
 
-	var orgp, parentp *property.Property
-	if org != nil && parent != nil && len(props) == 2 {
-		orgp = props[0]
-		parentp = props[1]
-	} else if org != nil && parent == nil && len(props) == 1 {
-		orgp = props[0]
-	} else if org == nil && parent != nil && len(props) == 1 {
-		parentp = props[0]
-	}
+	//var orgp, parentp *property.Property
+	//if org != nil && parent != nil && len(props) == 2 {
+	//	orgp = props[0]
+	//	parentp = props[1]
+	//} else if org != nil && parent == nil && len(props) == 1 {
+	//	orgp = props[0]
+	//} else if org == nil && parent != nil && len(props) == 1 {
+	//	parentp = props[0]
+	//}
 
 	res := property.Merge(orgp, parentp, linked)
 	return res, nil

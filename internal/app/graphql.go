@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	mongorepo "github.com/reearth/reearth-backend/internal/infrastructure/mongo"
+	"github.com/ravilushqa/otelgqlgen"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -10,7 +10,6 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler/lru"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/labstack/echo/v4"
-	"github.com/ravilushqa/otelgqlgen"
 	"github.com/reearth/reearth-backend/internal/adapter"
 	"github.com/reearth/reearth-backend/internal/adapter/gql"
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -37,7 +36,6 @@ func graphqlAPI(
 
 	srv := handler.NewDefaultServer(schema)
 	srv.Use(otelgqlgen.Middleware())
-
 	if conf.Config.GraphQL.ComplexityLimit > 0 {
 		srv.Use(extension.FixedComplexityLimit(conf.Config.GraphQL.ComplexityLimit))
 	}
@@ -66,7 +64,6 @@ func graphqlAPI(
 
 		usecases := adapter.Usecases(ctx)
 		ctx = gql.AttachUsecases(ctx, usecases, enableDataLoaders)
-		ctx = context.WithValue(ctx, mongorepo.DataLoadersKey(), mongorepo.NewLayerDataloader(ctx, conf.Repos.Layer))
 		c.SetRequest(req.WithContext(ctx))
 
 		srv.ServeHTTP(c.Response(), c.Request())

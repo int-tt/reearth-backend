@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
-
 	"github.com/labstack/echo/v4"
 	"github.com/reearth/reearth-backend/internal/adapter"
+	mongorepo "github.com/reearth/reearth-backend/internal/infrastructure/mongo"
 	"github.com/reearth/reearth-backend/internal/usecase/gateway"
 	"github.com/reearth/reearth-backend/internal/usecase/interactor"
 	"github.com/reearth/reearth-backend/internal/usecase/repo"
@@ -26,6 +26,7 @@ func UsecaseMiddleware(r *repo.Container, g *gateway.Container, config interacto
 
 		uc := interactor.NewContainer(r2, g, config)
 		ctx = adapter.AttachUsecases(ctx, &uc)
+		ctx = context.WithValue(ctx, mongorepo.DataLoadersKey(), mongorepo.NewDataLoaders(ctx, r2))
 		return ctx
 	})
 }
